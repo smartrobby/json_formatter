@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -30,8 +30,7 @@ class OutputState:
 
 
 class MainWindow(QMainWindow):
-    formatRequested = Signal(str)
-    repairRequested = Signal(str)
+    autoProcessRequested = Signal(str)
     copyRequested = Signal(str)
     saveRequested = Signal(str)
 
@@ -42,6 +41,9 @@ class MainWindow(QMainWindow):
 
         self._output_state = OutputState()
         self.controller = None
+        self.auto_process_timer = QTimer(self)
+        self.auto_process_timer.setSingleShot(True)
+        self.auto_process_timer.setInterval(200)
 
         self._build_ui()
         self._wire_actions()
@@ -60,13 +62,11 @@ class MainWindow(QMainWindow):
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
         toolbar_layout.setSpacing(8)
 
-        self.format_button = QPushButton("Format", toolbar)
-        self.repair_button = QPushButton("Repair", toolbar)
+        self.auto_mode_label = QLabel("Auto format/repair on paste or edit", toolbar)
         self.copy_button = QPushButton("Copy Output", toolbar)
         self.save_button = QPushButton("Save Output", toolbar)
 
-        toolbar_layout.addWidget(self.format_button)
-        toolbar_layout.addWidget(self.repair_button)
+        toolbar_layout.addWidget(self.auto_mode_label)
         toolbar_layout.addStretch(1)
         toolbar_layout.addWidget(self.copy_button)
         toolbar_layout.addWidget(self.save_button)
@@ -124,18 +124,11 @@ class MainWindow(QMainWindow):
         self.output_edit.setFont(font)
 
     def _wire_actions(self) -> None:
-        self.format_button.clicked.connect(self._emit_format_requested)
-        self.repair_button.clicked.connect(self._emit_repair_requested)
         self.copy_button.clicked.connect(self.copy_output_to_clipboard)
         self.save_button.clicked.connect(self.save_output_to_file)
 
-        self.input_edit.textChanged.connect(self._sync_output_buttons_state)
-
-        self.format_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        self.format_shortcut.activated.connect(self._emit_format_requested)
-
-        self.repair_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Return"), self)
-        self.repair_shortcut.activated.connect(self._emit_repair_requested)
+        self.input_edit.textChanged.connect(self._schedule_auto_processing)
+        self.auto_process_timer.timeout.connect(self._emit_auto_process_requested)
 
         self.save_shortcut = QShortcut(QKeySequence.Save, self)
         self.save_shortcut.activated.connect(self.save_output_to_file)
@@ -146,15 +139,33 @@ class MainWindow(QMainWindow):
         self.set_status("Ready")
         self.set_error("")
 
-    def _emit_format_requested(self) -> None:
-        self.formatRequested.emit(self.input_edit.toPlainText())
+    def _schedule_auto_processing(self) -> None:
+        current_text = self.input_edit.toPlainText()
+        if not current_text.strip():
+            self.auto_process_timer.stop()
+            self.clear_output()
+            return
 
-    def _emit_repair_requested(self) -> None:
-        self.repairRequested.emit(self.input_edit.toPlainText())
+        self._mark_output_stale()
+        self.auto_process_timer.start()
+
+    def _emit_auto_process_requested(self) -> None:
+        self.autoProcessRequested.emit(self.input_edit.toPlainText())
 
     def _sync_output_buttons_state(self) -> None:
         self.copy_button.setEnabled(self._output_state.has_success and bool(self._output_state.text))
         self.save_button.setEnabled(self._output_state.has_success and bool(self._output_state.text))
+
+    def _mark_output_stale(self) -> None:
+        self._output_state = OutputState(
+            text=self._output_state.text,
+            status_text="Updating...",
+            has_success=False,
+            default_filename=self._output_state.default_filename,
+        )
+        self.set_status("Updating...")
+        self.set_error("")
+        self._sync_output_buttons_state()
 
     def set_input_text(self, text: str) -> None:
         self.input_edit.setPlainText(text)
@@ -200,9 +211,6 @@ class MainWindow(QMainWindow):
         self.status_bar.setStyleSheet("QStatusBar { color: #b00020; }" if text else "")
 
     def set_processing(self, processing: bool) -> None:
-        self.format_button.setEnabled(not processing)
-        self.repair_button.setEnabled(not processing)
-        self.input_edit.setReadOnly(processing)
         if processing:
             self.set_status("Processing...")
         elif self._output_state.has_success:

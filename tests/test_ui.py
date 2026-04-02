@@ -21,8 +21,9 @@ def test_ui_structure_and_read_only_output(window: MainWindow) -> None:
     assert window.splitter.count() == 2
     assert window.output_edit.isReadOnly() is True
     assert window.input_edit.isReadOnly() is False
-    assert window.format_button.text() == "Format"
-    assert window.repair_button.text() == "Repair"
+    assert window.copy_button.text() == "Copy Output"
+    assert window.save_button.text() == "Save Output"
+    assert window.auto_mode_label.text() == "Auto format/repair on paste or edit"
 
 
 def test_buttons_enable_disable_state(window: MainWindow) -> None:
@@ -46,35 +47,36 @@ def test_buttons_enable_disable_state(window: MainWindow) -> None:
     assert window.error_label.text() == "bad input"
 
 
-def test_button_clicks_emit_requested_signals(window: MainWindow, qtbot) -> None:
-    captured = {"format": "", "repair": ""}
-    window.formatRequested.connect(lambda text: captured.__setitem__("format", text))
-    window.repairRequested.connect(lambda text: captured.__setitem__("repair", text))
+def test_input_change_emits_auto_process_request(window: MainWindow, qtbot) -> None:
+    with qtbot.waitSignal(window.autoProcessRequested, timeout=1000) as blocker:
+        window.set_input_text('{"x": 1}')
 
-    window.set_input_text('{"x": 1}')
-    qtbot.mouseClick(window.format_button, Qt.LeftButton)
-    qtbot.mouseClick(window.repair_button, Qt.LeftButton)
-
-    assert captured["format"] == '{"x": 1}'
-    assert captured["repair"] == '{"x": 1}'
+    assert blocker.args == ['{"x": 1}']
 
 
 def test_shortcuts_are_wired(window: MainWindow) -> None:
-    assert window.format_shortcut.key().toString() == "Ctrl+Return"
-    assert window.repair_shortcut.key().toString() == "Ctrl+Shift+Return"
     assert window.save_shortcut.key().toString() == "Ctrl+S"
 
 
-def test_controller_updates_window_state(window: MainWindow) -> None:
-    controller = JsonFormatterController(window)
+def test_controller_auto_formats_valid_json(window: MainWindow, qtbot) -> None:
+    window.controller = JsonFormatterController(window)
     window.set_input_text('{"a": 1}')
 
-    window.formatRequested.emit(window.get_input_text())
+    qtbot.waitUntil(lambda: window.get_output_text() == '{\n  "a": 1\n}', timeout=1000)
 
     assert window.get_output_text() == '{\n  "a": 1\n}'
     assert window.copy_button.isEnabled() is True
     assert window.save_button.isEnabled() is True
     assert window.status_label.text() == "Valid JSON"
+
+
+def test_controller_auto_repairs_invalid_json(window: MainWindow, qtbot) -> None:
+    window.controller = JsonFormatterController(window)
+    window.set_input_text("{'a': 1,}")
+
+    qtbot.waitUntil(lambda: window.get_output_text() == '{\n  "a": 1\n}', timeout=1000)
+
+    assert window.status_label.text() == "Repaired JSON"
 
 
 def test_save_output_writes_expected_file(window: MainWindow, tmp_path: Path, monkeypatch) -> None:
