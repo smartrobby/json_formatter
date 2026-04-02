@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .highlighter import JsonSyntaxHighlighter
+
 
 @dataclass(slots=True)
 class OutputState:
@@ -44,6 +46,7 @@ class MainWindow(QMainWindow):
         self.auto_process_timer = QTimer(self)
         self.auto_process_timer.setSingleShot(True)
         self.auto_process_timer.setInterval(200)
+        self.output_highlighter = None
 
         self._build_ui()
         self._wire_actions()
@@ -95,6 +98,7 @@ class MainWindow(QMainWindow):
         self.output_edit.setAcceptRichText(False)
         self.output_edit.setReadOnly(True)
         self.output_edit.setPlaceholderText("Formatted JSON will appear here")
+        self.output_edit.setStyleSheet("QTextEdit { background: #fbfcfe; }")
         right_layout.addWidget(self.output_edit, 1)
 
         root_layout.addWidget(toolbar)
@@ -122,6 +126,7 @@ class MainWindow(QMainWindow):
         font.setPointSize(10)
         self.input_edit.setFont(font)
         self.output_edit.setFont(font)
+        self.output_highlighter = JsonSyntaxHighlighter(self.output_edit.document())
 
     def _wire_actions(self) -> None:
         self.copy_button.clicked.connect(self.copy_output_to_clipboard)

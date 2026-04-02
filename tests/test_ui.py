@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog
 
 from json_formatter.app import JsonFormatterController
+from json_formatter.ui import JsonSyntaxHighlighter
 from json_formatter.ui.main_window import MainWindow
 
 
@@ -24,6 +25,8 @@ def test_ui_structure_and_read_only_output(window: MainWindow) -> None:
     assert window.copy_button.text() == "Copy Output"
     assert window.save_button.text() == "Save Output"
     assert window.auto_mode_label.text() == "Auto format/repair on paste or edit"
+    assert isinstance(window.output_highlighter, JsonSyntaxHighlighter)
+    assert window.output_highlighter.document() is window.output_edit.document()
 
 
 def test_buttons_enable_disable_state(window: MainWindow) -> None:

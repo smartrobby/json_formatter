@@ -1,6 +1,6 @@
 # Invalid JSON Example
 
-아래 예제는 문법 오류가 있는 JSON이다. `Repair` 기능 테스트에 사용할 수 있다.
+아래 예제는 문법 오류가 있는 JSON이다. `Raw JSON Input`에 붙여넣으면 자동 repair와 output pane 색상 적용을 확인할 수 있다.
 
 - 포함된 오류:
   - single quotes 사용
