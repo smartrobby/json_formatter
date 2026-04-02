@@ -14,7 +14,9 @@
   - number: orange
   - `true` / `false` / `null`: red
   - braces / brackets / separators: gray
-- `Ctrl + mouse wheel` over either JSON pane to zoom the shared editor font size
+- `Ctrl + mouse wheel`로 pane별 폰트 크기 조절
+  - 입력창과 출력창이 서로 독립적으로 확대/축소됨
+  - 마지막 폰트 크기가 앱 재실행 후에도 유지됨
 - `Copy Output`으로 clipboard 복사
 - `Save Output`으로 UTF-8 JSON 파일 저장
 - standalone Windows `.exe` 빌드 및 smoke-test 지원
@@ -40,8 +42,7 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-입력창에 JSON을 붙여넣으면 앱이 자동으로 `format -> repair fallback` 순서로 처리한다.
-입력창이나 출력창 위에서 `Ctrl + mouse wheel`을 사용하면 두 pane의 공통 폰트 크기를 확대/축소할 수 있다.
+입력창에 JSON을 붙여넣으면 앱이 자동으로 `format -> repair fallback` 순서로 처리한다. `Ctrl + mouse wheel`을 입력창이나 출력창 위에서 사용하면 각 pane의 폰트 크기를 개별적으로 조절할 수 있고, 재실행 후에도 복원된다.
 
 ## Test
 
@@ -81,7 +82,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
 
 - `main.py`: 실행 진입점
 - `src/json_formatter/app.py`: 앱 부트스트랩, controller, smoke-test
-- `src/json_formatter/ui/main_window.py`: 메인 UI
+- `src/json_formatter/ui/main_window.py`: 메인 UI와 per-pane font persistence
 - `src/json_formatter/ui/highlighter.py`: output pane syntax highlighting
 - `src/json_formatter/services/formatter.py`: strict formatter
 - `src/json_formatter/services/repairer.py`: repair logic
@@ -105,7 +106,9 @@ $env:QT_QPA_PLATFORM = "offscreen"
   - numbers: orange
   - `true` / `false` / `null`: red
   - braces / brackets / separators: gray
-- `Ctrl + mouse wheel` over either JSON pane to zoom the shared editor font size
+- Per-pane font zoom with `Ctrl + mouse wheel`
+  - the input and output panes zoom independently
+  - the last font size for each pane is restored after app restart
 - Clipboard copy with `Copy Output`
 - UTF-8 file export with `Save Output`
 - Standalone Windows `.exe` build and smoke-test support
@@ -131,8 +134,7 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-When you paste JSON into the input pane, the app automatically runs `format -> repair fallback`.
-When you use `Ctrl + mouse wheel` over either editor, both panes update to the same larger or smaller font size.
+When you paste JSON into the input pane, the app automatically runs `format -> repair fallback`. When you use `Ctrl + mouse wheel` over the input or output editor, only that pane changes size, and the size is restored on the next launch.
 
 ## Test
 
@@ -172,7 +174,7 @@ On success, the process exits with code `0`, and `dist\smoke-report.json` contai
 
 - `main.py`: application entry point
 - `src/json_formatter/app.py`: app bootstrap, controller, and smoke-test flow
-- `src/json_formatter/ui/main_window.py`: main UI
+- `src/json_formatter/ui/main_window.py`: main UI and per-pane font persistence
 - `src/json_formatter/ui/highlighter.py`: output pane syntax highlighting
 - `src/json_formatter/services/formatter.py`: strict formatter
 - `src/json_formatter/services/repairer.py`: repair logic

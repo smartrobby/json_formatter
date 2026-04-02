@@ -19,7 +19,8 @@ def create_application(argv: Sequence[str] | None = None) -> QApplication:
     if app is None:
         qt_argv = [sys.argv[0], *list(argv or [])]
         app = QApplication(qt_argv)
-        app.setApplicationName("JSON Viewer & Formatter")
+    app.setOrganizationName("smartrobby")
+    app.setApplicationName("JSON Viewer & Formatter")
     return app
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextCursor, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,6 +21,12 @@ from PySide6.QtWidgets import (
 )
 
 from .highlighter import JsonSyntaxHighlighter
+
+DEFAULT_EDITOR_FONT_SIZE = 10
+MIN_EDITOR_FONT_SIZE = 8
+MAX_EDITOR_FONT_SIZE = 28
+INPUT_FONT_SIZE_KEY = "ui/font_size/input"
+OUTPUT_FONT_SIZE_KEY = "ui/font_size/output"
 
 
 @dataclass(slots=True)
@@ -57,7 +63,15 @@ class MainWindow(QMainWindow):
 
         self._output_state = OutputState()
         self.controller = None
-        self._editor_font_size = 10
+        self._settings = self._create_settings()
+        self._input_font_size = self._load_font_size(
+            INPUT_FONT_SIZE_KEY,
+            DEFAULT_EDITOR_FONT_SIZE,
+        )
+        self._output_font_size = self._load_font_size(
+            OUTPUT_FONT_SIZE_KEY,
+            DEFAULT_EDITOR_FONT_SIZE,
+        )
         self.auto_process_timer = QTimer(self)
         self.auto_process_timer.setSingleShot(True)
         self.auto_process_timer.setInterval(200)
@@ -134,7 +148,7 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes([1, 1])
 
     def _apply_monospace_font(self) -> None:
-        self._apply_editor_font_size()
+        self._apply_all_editor_font_sizes()
         self.output_highlighter = JsonSyntaxHighlighter(self.output_edit.document())
 
     def _wire_actions(self) -> None:
@@ -143,11 +157,27 @@ class MainWindow(QMainWindow):
 
         self.input_edit.textChanged.connect(self._schedule_auto_processing)
         self.auto_process_timer.timeout.connect(self._emit_auto_process_requested)
-        self.input_edit.fontZoomRequested.connect(self.adjust_editor_font_size)
-        self.output_edit.fontZoomRequested.connect(self.adjust_editor_font_size)
+        self.input_edit.fontZoomRequested.connect(self.adjust_input_font_size)
+        self.output_edit.fontZoomRequested.connect(self.adjust_output_font_size)
 
         self.save_shortcut = QShortcut(QKeySequence.Save, self)
         self.save_shortcut.activated.connect(self.save_output_to_file)
+
+    def _create_settings(self) -> QSettings:
+        app = QApplication.instance()
+        if app is not None:
+            if not app.organizationName():
+                app.setOrganizationName("smartrobby")
+            if not app.applicationName():
+                app.setApplicationName("JSON Viewer & Formatter")
+        return QSettings()
+
+    def _load_font_size(self, key: str, default: int) -> int:
+        raw_value = self._settings.value(key, default)
+        try:
+            return self._clamp_font_size(int(raw_value))
+        except (TypeError, ValueError):
+            return default
 
     def _build_monospace_font(self, point_size: int) -> QFont:
         font = QFont("Consolas")
@@ -157,10 +187,33 @@ class MainWindow(QMainWindow):
         font.setPointSize(point_size)
         return font
 
-    def _apply_editor_font_size(self) -> None:
-        font = self._build_monospace_font(self._editor_font_size)
-        self.input_edit.setFont(font)
-        self.output_edit.setFont(font)
+    def _apply_editor_font_size(self, editor: QTextEdit, point_size: int) -> None:
+        editor.setFont(self._build_monospace_font(point_size))
+
+    def _apply_all_editor_font_sizes(self) -> None:
+        self._apply_editor_font_size(self.input_edit, self._input_font_size)
+        self._apply_editor_font_size(self.output_edit, self._output_font_size)
+
+    def _clamp_font_size(self, point_size: int) -> int:
+        return max(MIN_EDITOR_FONT_SIZE, min(MAX_EDITOR_FONT_SIZE, point_size))
+
+    def _update_editor_font_size(
+        self,
+        editor: QTextEdit,
+        key: str,
+        current_size: int,
+        delta: int,
+        status_prefix: str,
+    ) -> int:
+        new_size = self._clamp_font_size(current_size + delta)
+        if new_size == current_size:
+            return current_size
+
+        self._apply_editor_font_size(editor, new_size)
+        self._settings.setValue(key, new_size)
+        self._settings.sync()
+        self.set_status(f"{status_prefix} font size: {new_size}pt")
+        return new_size
 
     def _apply_default_state(self) -> None:
         self.copy_button.setEnabled(False)
@@ -205,14 +258,23 @@ class MainWindow(QMainWindow):
     def get_output_text(self) -> str:
         return self.output_edit.toPlainText()
 
-    def adjust_editor_font_size(self, delta: int) -> None:
-        new_size = max(8, min(28, self._editor_font_size + delta))
-        if new_size == self._editor_font_size:
-            return
+    def adjust_input_font_size(self, delta: int) -> None:
+        self._input_font_size = self._update_editor_font_size(
+            self.input_edit,
+            INPUT_FONT_SIZE_KEY,
+            self._input_font_size,
+            delta,
+            "Input",
+        )
 
-        self._editor_font_size = new_size
-        self._apply_editor_font_size()
-        self.set_status(f"Font size: {self._editor_font_size}pt")
+    def adjust_output_font_size(self, delta: int) -> None:
+        self._output_font_size = self._update_editor_font_size(
+            self.output_edit,
+            OUTPUT_FONT_SIZE_KEY,
+            self._output_font_size,
+            delta,
+            "Output",
+        )
 
     def set_output_text(
         self,

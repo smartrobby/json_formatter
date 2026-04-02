@@ -8,7 +8,8 @@
 - strict JSON이면 바로 pretty format 결과를 출력한다.
 - strict parse가 실패하면 `json_repair`로 복구를 시도하고, 복구 성공 시 pretty JSON을 출력한다.
 - format 또는 repair가 완료된 output pane에는 JSON syntax highlighting을 적용한다.
-- 입력창 또는 출력창 위에서 `Ctrl + mouse wheel`을 사용하면 두 pane의 공통 폰트 크기를 조정한다.
+- 입력창과 출력창은 각각 `Ctrl + mouse wheel`로 독립적인 폰트 크기 조절이 가능하다.
+- 각 pane의 마지막 폰트 크기는 `QSettings`로 저장되어 앱 재실행 후에도 복원된다.
 - 결과 JSON은 `Copy Output`으로 clipboard에 복사하고 `Save Output`으로 파일로 저장할 수 있다.
 
 ## 실행 환경
@@ -63,7 +64,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
 
 - `main.py`: 루트 실행 진입점. `src`를 `sys.path`에 추가한 뒤 `json_formatter.app.main()`을 호출한다.
 - `src/json_formatter/app.py`: `QApplication`, `MainWindow`, `JsonFormatterController`, CLI smoke-test를 연결한다.
-- `src/json_formatter/ui/main_window.py`: 메인 UI. 좌측 `input_edit`, 우측 `output_edit`, 자동 처리 debounce, `Copy Output`, `Save Output`, status bar를 담당한다.
+- `src/json_formatter/ui/main_window.py`: 메인 UI. 좌측 `input_edit`, 우측 `output_edit`, 자동 처리 debounce, per-pane font persistence, `Copy Output`, `Save Output`, status bar를 담당한다.
 - `src/json_formatter/ui/highlighter.py`: output pane JSON syntax highlighting을 담당한다.
 - `src/json_formatter/services/formatter.py`: strict JSON pretty formatter.
 - `src/json_formatter/services/repairer.py`: `json_repair` 기반 복구 + 재검증 + pretty output.
@@ -81,18 +82,13 @@ $env:QT_QPA_PLATFORM = "offscreen"
   - `input_edit`는 편집 가능, `output_edit`는 read-only.
   - 입력 변경 시 `QTimer` debounce 후 `autoProcessRequested`를 emit 한다.
   - `output_edit`에는 `JsonSyntaxHighlighter`가 붙어서 key, string, number, literal, punctuation에 색을 입힌다.
-  - `Ctrl + mouse wheel`을 입력창이나 출력창 위에서 사용하면 두 pane의 공통 폰트 크기를 함께 조정한다.
+  - 입력창과 출력창은 서로 다른 폰트 크기 상태를 가진다.
+  - 각 pane의 폰트 크기는 `QSettings` 키 `ui/font_size/input`, `ui/font_size/output`에 저장된다.
   - 결과가 성공일 때만 `Copy Output`, `Save Output`이 활성화된다.
   - `Ctrl+S`는 저장 shortcut이다.
 - `ZoomableTextEdit`
   - `Ctrl + wheel` 이벤트를 감지하고 `fontZoomRequested` signal을 emit 한다.
-  - 실제 폰트 크기 변경은 `MainWindow.adjust_editor_font_size()`가 공통으로 적용한다.
-- `JsonSyntaxHighlighter`
-  - key: blue
-  - string: green
-  - number: orange
-  - `true` / `false` / `null`: red
-  - braces / brackets / separators: gray
+  - 입력창은 `adjust_input_font_size()`, 출력창은 `adjust_output_font_size()`에 연결된다.
 - `format_json(input_text)`
   - `json.loads()`로 strict parse.
   - 성공 시 `json.dumps(indent=2, ensure_ascii=False, sort_keys=False)` 반환.
@@ -101,6 +97,15 @@ $env:QT_QPA_PLATFORM = "offscreen"
   - `json_repair.repair_json(..., ensure_ascii=False, indent=2)` 사용.
   - 복구 후 `json.loads()`로 다시 검증한다.
   - 복구 실패 시 `Unable to repair JSON: ...` 형태의 메시지를 반환한다.
+
+## 폰트 저장 흐름
+
+1. `create_application()`이 `smartrobby` organization name과 앱 이름을 설정한다.
+2. `MainWindow` 초기화 시 `QSettings()`를 만들고 저장된 input/output 폰트 크기를 읽는다.
+3. 저장값이 없거나 잘못된 경우 기본값 `10pt`를 사용한다.
+4. 사용자가 입력창 위에서 `Ctrl + mouse wheel`을 사용하면 입력창 크기만 변경되고 `ui/font_size/input`에 즉시 저장된다.
+5. 사용자가 출력창 위에서 `Ctrl + mouse wheel`을 사용하면 출력창 크기만 변경되고 `ui/font_size/output`에 즉시 저장된다.
+6. 다음 실행 시 두 pane는 각각 마지막 저장값으로 복원된다.
 
 ## 이벤트 흐름
 
@@ -111,13 +116,11 @@ $env:QT_QPA_PLATFORM = "offscreen"
 5. strict `format` 성공 시:
    - 우측 `output_edit`에 pretty JSON을 표시한다.
    - syntax highlighting이 자동 적용된다.
-   - 사용자는 이후 `Ctrl + mouse wheel`로 두 pane 폰트 크기를 함께 조절할 수 있다.
    - status는 `Valid JSON`.
    - 기본 저장 파일명은 `formatted.json`.
 6. strict `format` 실패 후 `repair` 성공 시:
    - 우측 `output_edit`에 복구된 pretty JSON을 표시한다.
    - syntax highlighting이 자동 적용된다.
-   - 사용자는 이후 `Ctrl + mouse wheel`로 두 pane 폰트 크기를 함께 조절할 수 있다.
    - status는 `Repaired JSON`.
    - 기본 저장 파일명은 `repaired.json`.
 7. 둘 다 실패 시:
@@ -146,7 +149,8 @@ $env:QT_QPA_PLATFORM = "offscreen"
   - 좌우 pane 구성.
   - 우측 출력 read-only.
   - output document에 `JsonSyntaxHighlighter` 연결 여부.
-  - `Ctrl + mouse wheel`로 두 pane 폰트 크기 동기 조절 여부.
+  - 입력창과 출력창의 `Ctrl + mouse wheel`이 독립적으로 폰트 크기를 조절하는지 확인.
+  - pane별 폰트 크기가 `QSettings`를 통해 재실행 후 복원되는지 확인.
   - 입력 변경 시 `autoProcessRequested` 발생.
   - valid 입력 자동 format.
   - invalid 입력 자동 repair.
