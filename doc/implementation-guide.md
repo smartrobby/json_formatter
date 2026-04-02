@@ -8,6 +8,7 @@
 - strict JSON이면 바로 pretty format 결과를 출력한다.
 - strict parse가 실패하면 `json_repair`로 복구를 시도하고, 복구 성공 시 pretty JSON을 출력한다.
 - format 또는 repair가 완료된 output pane에는 JSON syntax highlighting을 적용한다.
+- 입력창 또는 출력창 위에서 `Ctrl + mouse wheel`을 사용하면 두 pane의 공통 폰트 크기를 조정한다.
 - 결과 JSON은 `Copy Output`으로 clipboard에 복사하고 `Save Output`으로 파일로 저장할 수 있다.
 
 ## 실행 환경
@@ -80,8 +81,12 @@ $env:QT_QPA_PLATFORM = "offscreen"
   - `input_edit`는 편집 가능, `output_edit`는 read-only.
   - 입력 변경 시 `QTimer` debounce 후 `autoProcessRequested`를 emit 한다.
   - `output_edit`에는 `JsonSyntaxHighlighter`가 붙어서 key, string, number, literal, punctuation에 색을 입힌다.
+  - `Ctrl + mouse wheel`을 입력창이나 출력창 위에서 사용하면 두 pane의 공통 폰트 크기를 함께 조정한다.
   - 결과가 성공일 때만 `Copy Output`, `Save Output`이 활성화된다.
   - `Ctrl+S`는 저장 shortcut이다.
+- `ZoomableTextEdit`
+  - `Ctrl + wheel` 이벤트를 감지하고 `fontZoomRequested` signal을 emit 한다.
+  - 실제 폰트 크기 변경은 `MainWindow.adjust_editor_font_size()`가 공통으로 적용한다.
 - `JsonSyntaxHighlighter`
   - key: blue
   - string: green
@@ -106,11 +111,13 @@ $env:QT_QPA_PLATFORM = "offscreen"
 5. strict `format` 성공 시:
    - 우측 `output_edit`에 pretty JSON을 표시한다.
    - syntax highlighting이 자동 적용된다.
+   - 사용자는 이후 `Ctrl + mouse wheel`로 두 pane 폰트 크기를 함께 조절할 수 있다.
    - status는 `Valid JSON`.
    - 기본 저장 파일명은 `formatted.json`.
 6. strict `format` 실패 후 `repair` 성공 시:
    - 우측 `output_edit`에 복구된 pretty JSON을 표시한다.
    - syntax highlighting이 자동 적용된다.
+   - 사용자는 이후 `Ctrl + mouse wheel`로 두 pane 폰트 크기를 함께 조절할 수 있다.
    - status는 `Repaired JSON`.
    - 기본 저장 파일명은 `repaired.json`.
 7. 둘 다 실패 시:
@@ -139,6 +146,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
   - 좌우 pane 구성.
   - 우측 출력 read-only.
   - output document에 `JsonSyntaxHighlighter` 연결 여부.
+  - `Ctrl + mouse wheel`로 두 pane 폰트 크기 동기 조절 여부.
   - 입력 변경 시 `autoProcessRequested` 발생.
   - valid 입력 자동 format.
   - invalid 입력 자동 repair.

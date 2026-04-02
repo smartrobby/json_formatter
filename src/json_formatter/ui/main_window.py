@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QTimer, Qt, Signal
-from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextCursor
+from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextCursor, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -31,6 +31,20 @@ class OutputState:
     default_filename: str = "formatted.json"
 
 
+class ZoomableTextEdit(QTextEdit):
+    fontZoomRequested = Signal(int)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if event.modifiers() & Qt.ControlModifier:
+            angle_delta = event.angleDelta().y()
+            if angle_delta:
+                self.fontZoomRequested.emit(1 if angle_delta > 0 else -1)
+                event.accept()
+                return
+
+        super().wheelEvent(event)
+
+
 class MainWindow(QMainWindow):
     autoProcessRequested = Signal(str)
     copyRequested = Signal(str)
@@ -43,6 +57,7 @@ class MainWindow(QMainWindow):
 
         self._output_state = OutputState()
         self.controller = None
+        self._editor_font_size = 10
         self.auto_process_timer = QTimer(self)
         self.auto_process_timer.setSingleShot(True)
         self.auto_process_timer.setInterval(200)
@@ -83,7 +98,7 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(6)
         left_layout.addWidget(QLabel("Raw JSON Input", left_panel))
 
-        self.input_edit = QTextEdit(left_panel)
+        self.input_edit = ZoomableTextEdit(left_panel)
         self.input_edit.setAcceptRichText(False)
         self.input_edit.setPlaceholderText("Paste or type JSON here")
         left_layout.addWidget(self.input_edit, 1)
@@ -94,7 +109,7 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(6)
         right_layout.addWidget(QLabel("Formatted / Repaired Output", right_panel))
 
-        self.output_edit = QTextEdit(right_panel)
+        self.output_edit = ZoomableTextEdit(right_panel)
         self.output_edit.setAcceptRichText(False)
         self.output_edit.setReadOnly(True)
         self.output_edit.setPlaceholderText("Formatted JSON will appear here")
@@ -119,13 +134,7 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes([1, 1])
 
     def _apply_monospace_font(self) -> None:
-        font = QFont("Consolas")
-        if not font.exactMatch():
-            font = QFont("Courier New")
-        font.setStyleHint(QFont.Monospace)
-        font.setPointSize(10)
-        self.input_edit.setFont(font)
-        self.output_edit.setFont(font)
+        self._apply_editor_font_size()
         self.output_highlighter = JsonSyntaxHighlighter(self.output_edit.document())
 
     def _wire_actions(self) -> None:
@@ -134,9 +143,24 @@ class MainWindow(QMainWindow):
 
         self.input_edit.textChanged.connect(self._schedule_auto_processing)
         self.auto_process_timer.timeout.connect(self._emit_auto_process_requested)
+        self.input_edit.fontZoomRequested.connect(self.adjust_editor_font_size)
+        self.output_edit.fontZoomRequested.connect(self.adjust_editor_font_size)
 
         self.save_shortcut = QShortcut(QKeySequence.Save, self)
         self.save_shortcut.activated.connect(self.save_output_to_file)
+
+    def _build_monospace_font(self, point_size: int) -> QFont:
+        font = QFont("Consolas")
+        if not font.exactMatch():
+            font = QFont("Courier New")
+        font.setStyleHint(QFont.Monospace)
+        font.setPointSize(point_size)
+        return font
+
+    def _apply_editor_font_size(self) -> None:
+        font = self._build_monospace_font(self._editor_font_size)
+        self.input_edit.setFont(font)
+        self.output_edit.setFont(font)
 
     def _apply_default_state(self) -> None:
         self.copy_button.setEnabled(False)
@@ -180,6 +204,15 @@ class MainWindow(QMainWindow):
 
     def get_output_text(self) -> str:
         return self.output_edit.toPlainText()
+
+    def adjust_editor_font_size(self, delta: int) -> None:
+        new_size = max(8, min(28, self._editor_font_size + delta))
+        if new_size == self._editor_font_size:
+            return
+
+        self._editor_font_size = new_size
+        self._apply_editor_font_size()
+        self.set_status(f"Font size: {self._editor_font_size}pt")
 
     def set_output_text(
         self,

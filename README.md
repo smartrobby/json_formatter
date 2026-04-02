@@ -14,6 +14,7 @@
   - number: orange
   - `true` / `false` / `null`: red
   - braces / brackets / separators: gray
+- `Ctrl + mouse wheel` over either JSON pane to zoom the shared editor font size
 - `Copy Output`으로 clipboard 복사
 - `Save Output`으로 UTF-8 JSON 파일 저장
 - standalone Windows `.exe` 빌드 및 smoke-test 지원
@@ -40,6 +41,7 @@ python main.py
 ```
 
 입력창에 JSON을 붙여넣으면 앱이 자동으로 `format -> repair fallback` 순서로 처리한다.
+입력창이나 출력창 위에서 `Ctrl + mouse wheel`을 사용하면 두 pane의 공통 폰트 크기를 확대/축소할 수 있다.
 
 ## Test
 
@@ -103,6 +105,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
   - numbers: orange
   - `true` / `false` / `null`: red
   - braces / brackets / separators: gray
+- `Ctrl + mouse wheel` over either JSON pane to zoom the shared editor font size
 - Clipboard copy with `Copy Output`
 - UTF-8 file export with `Save Output`
 - Standalone Windows `.exe` build and smoke-test support
@@ -129,6 +132,7 @@ python main.py
 ```
 
 When you paste JSON into the input pane, the app automatically runs `format -> repair fallback`.
+When you use `Ctrl + mouse wheel` over either editor, both panes update to the same larger or smaller font size.
 
 ## Test
 

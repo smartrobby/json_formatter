@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QFileDialog
 
 from json_formatter.app import JsonFormatterController
@@ -59,6 +60,40 @@ def test_input_change_emits_auto_process_request(window: MainWindow, qtbot) -> N
 
 def test_shortcuts_are_wired(window: MainWindow) -> None:
     assert window.save_shortcut.key().toString() == "Ctrl+S"
+
+
+def test_ctrl_wheel_adjusts_shared_editor_font_size(window: MainWindow) -> None:
+    initial_size = window.input_edit.font().pointSize()
+
+    zoom_in_event = QWheelEvent(
+        QPointF(20, 20),
+        QPointF(20, 20),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.NoButton,
+        Qt.ControlModifier,
+        Qt.ScrollUpdate,
+        False,
+    )
+    window.input_edit.wheelEvent(zoom_in_event)
+
+    assert window.input_edit.font().pointSize() == initial_size + 1
+    assert window.output_edit.font().pointSize() == initial_size + 1
+
+    zoom_out_event = QWheelEvent(
+        QPointF(20, 20),
+        QPointF(20, 20),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.NoButton,
+        Qt.ControlModifier,
+        Qt.ScrollUpdate,
+        False,
+    )
+    window.output_edit.wheelEvent(zoom_out_event)
+
+    assert window.input_edit.font().pointSize() == initial_size
+    assert window.output_edit.font().pointSize() == initial_size
 
 
 def test_controller_auto_formats_valid_json(window: MainWindow, qtbot) -> None:
