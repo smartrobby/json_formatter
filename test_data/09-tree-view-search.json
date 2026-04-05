@@ -1,0 +1,99 @@
+{
+  "regions": [
+    {
+      "name": "warehouse-east",
+      "sites": [
+        {
+          "siteId": "east-01",
+          "devices": [
+            {
+              "deviceId": "scanner-01",
+              "battery": {
+                "health": "good",
+                "lastCheckedAt": "2026-04-05T08:10:00+09:00"
+              }
+            },
+            {
+              "deviceId": "tablet-09",
+              "battery": {
+                "health": "warning",
+                "lastCheckedAt": "2026-04-05T08:14:00+09:00"
+              }
+            }
+          ],
+          "tickets": [
+            {
+              "ticketId": "t-100",
+              "title": "Replace cracked scanner screen",
+              "owner": "Robby"
+            }
+          ]
+        },
+        {
+          "siteId": "east-02",
+          "devices": [
+            {
+              "deviceId": "printer-03",
+              "battery": {
+                "health": "n/a",
+                "lastCheckedAt": "2026-04-05T07:58:00+09:00"
+              }
+            }
+          ],
+          "tickets": [
+            {
+              "ticketId": "t-101",
+              "title": "Update warehouse label layout",
+              "owner": "Alex"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "warehouse-west",
+      "sites": [
+        {
+          "siteId": "west-01",
+          "devices": [
+            {
+              "deviceId": "scanner-88",
+              "battery": {
+                "health": "good",
+                "lastCheckedAt": "2026-04-05T08:02:00+09:00"
+              }
+            },
+            {
+              "deviceId": "robot-12",
+              "battery": {
+                "health": "critical",
+                "lastCheckedAt": "2026-04-05T08:01:00+09:00"
+              }
+            }
+          ],
+          "tickets": [
+            {
+              "ticketId": "t-202",
+              "title": "Investigate battery drain on robot-12",
+              "owner": "Mina"
+            },
+            {
+              "ticketId": "t-203",
+              "title": "Audit warehouse-west spare battery stock",
+              "owner": "Noah"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reportMeta": {
+    "generatedBy": "tree-view-demo",
+    "recommendedQueries": [
+      "battery",
+      "ticket",
+      "warehouse",
+      "$.regions[1].sites[0].devices[1]"
+    ]
+  }
+}

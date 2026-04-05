@@ -1,0 +1,4 @@
+{"recordType":"session","id":"s-001","user":"robby","action":"open-file","meta":{"source":"drag-drop","filename":"02-invalid-syntax-a4.txt"}}
+{"recordType":"session","id":"s-002","user":"alex","action":"repair","meta":{"mode":"safe","risk":"medium","summaryCount":4}}
+{"recordType":"session","id":"s-003","user":"mina","action":"tree-search","meta":{"query":"battery","path":"$.regions[1].sites[0].devices[1].battery.health"}}
+{"recordType":"session","id":"s-004","user":"noah","action":"copy-path","meta":{"path":"$.regions[0].sites[1].tickets[0].owner"}}

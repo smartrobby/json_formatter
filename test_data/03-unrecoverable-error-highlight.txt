@@ -1,0 +1,6 @@
+hello === world >>>
+2026-04-05T09:00:00+09:00 START
+user=robby status=>broken
+payload=<root><item>1</item><item>2</item></root>
+This is not JSON, not JSON Lines, and not an event stream payload.
+The app should fail both strict formatting and repair for this input.
