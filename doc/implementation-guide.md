@@ -45,7 +45,7 @@ pytest -q
 - 정적 import/문법 확인:
 
 ```powershell
-python -m compileall src tests main.py
+python -m coOmpileall src tests main.py
 ```
 
 - standalone exe 빌드:
