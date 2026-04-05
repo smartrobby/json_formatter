@@ -15,6 +15,9 @@ def format_json(input_text: str) -> JsonResult:
             output_text="",
             error_message=_format_decode_error(exc),
             status_label="error",
+            error_line=exc.lineno,
+            error_column=exc.colno,
+            error_index=exc.pos,
         )
     except ValueError as exc:
         return JsonResult(
@@ -32,6 +35,8 @@ def format_json(input_text: str) -> JsonResult:
         output_text=formatted,
         error_message="",
         status_label="valid",
+        parsed_value=parsed,
+        detected_input_kind="json",
     )
 
 
