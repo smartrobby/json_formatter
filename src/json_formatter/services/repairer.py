@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass, field
 
 from json_repair import repair_json
 
-from ..models import JsonResult
+from ..models import JsonResult, RepairMode, RiskLevel, UiMessage
+from .repair_diff import build_repair_diff
 
 SMART_DOUBLE_QUOTES_TRANSLATION = str.maketrans(
     {
@@ -16,13 +18,61 @@ SMART_DOUBLE_QUOTES_TRANSLATION = str.maketrans(
         "\uff02": '"',
     }
 )
+RISK_PRIORITY: dict[RiskLevel, int] = {"low": 1, "medium": 2, "high": 3}
 
 
-def repair_json_text(input_text: str) -> JsonResult:
-    normalized_input = _prepare_repair_input(input_text)
-    extracted_result = _repair_extracted_fragments(normalized_input)
-    if extracted_result is not None:
-        return extracted_result
+@dataclass(slots=True)
+class RepairTrace:
+    change_summary: list[UiMessage] = field(default_factory=list)
+    repair_warnings: list[UiMessage] = field(default_factory=list)
+    risk_level: RiskLevel | None = None
+    detected_input_kind: str | None = None
+    quote_heuristic_applied: bool = False
+
+    def add_summary(self, code: str, **params: str | int) -> None:
+        message = UiMessage(code=code, params=params)
+        if message not in self.change_summary:
+            self.change_summary.append(message)
+
+    def add_warning(self, code: str, risk_level: RiskLevel, **params: str | int) -> None:
+        message = UiMessage(code=code, params=params)
+        if message not in self.repair_warnings:
+            self.repair_warnings.append(message)
+        self.raise_risk(risk_level)
+
+    def raise_risk(self, risk_level: RiskLevel) -> None:
+        if self.risk_level is None or RISK_PRIORITY[risk_level] > RISK_PRIORITY[self.risk_level]:
+            self.risk_level = risk_level
+
+    def set_detected_input_kind(self, input_kind: str) -> None:
+        if self.detected_input_kind is None:
+            self.detected_input_kind = input_kind
+
+
+def repair_json_text(input_text: str, repair_mode: RepairMode = "safe") -> JsonResult:
+    trace = RepairTrace()
+    normalized_input = _prepare_repair_input(input_text, repair_mode, trace)
+
+    if repair_mode == "strict":
+        fragments = _extract_json_fragments(normalized_input)
+        if len(fragments) > 1:
+            trace.set_detected_input_kind(_detect_fragment_input_kind(input_text))
+            return JsonResult(
+                success=False,
+                mode="repair",
+                output_text="",
+                error_message="Strict repair mode does not merge multiple top-level JSON documents.",
+                status_label="error",
+                change_summary=trace.change_summary,
+                repair_warnings=trace.repair_warnings,
+                risk_level=trace.risk_level,
+                detected_input_kind=trace.detected_input_kind,
+            )
+
+    if repair_mode != "strict":
+        extracted_result = _repair_extracted_fragments(normalized_input, repair_mode, trace)
+        if extracted_result is not None:
+            return extracted_result
 
     try:
         repaired_text = repair_json(
@@ -38,6 +88,10 @@ def repair_json_text(input_text: str) -> JsonResult:
             output_text="",
             error_message=_format_repair_error(exc),
             status_label="error",
+            change_summary=trace.change_summary,
+            repair_warnings=trace.repair_warnings,
+            risk_level=trace.risk_level,
+            detected_input_kind=trace.detected_input_kind,
         )
 
     if not isinstance(repaired_text, str):
@@ -47,6 +101,10 @@ def repair_json_text(input_text: str) -> JsonResult:
             output_text="",
             error_message="JSON repair did not return a text result.",
             status_label="error",
+            change_summary=trace.change_summary,
+            repair_warnings=trace.repair_warnings,
+            risk_level=trace.risk_level,
+            detected_input_kind=trace.detected_input_kind,
         )
 
     try:
@@ -58,8 +116,19 @@ def repair_json_text(input_text: str) -> JsonResult:
             output_text="",
             error_message=_format_decode_error(exc),
             status_label="error",
+            change_summary=trace.change_summary,
+            repair_warnings=trace.repair_warnings,
+            risk_level=trace.risk_level,
+            detected_input_kind=trace.detected_input_kind,
+            error_line=exc.lineno,
+            error_column=exc.colno,
+            error_index=exc.pos,
         )
 
+    return _build_success_result(parsed, trace, input_text)
+
+
+def _build_success_result(parsed: object, trace: RepairTrace, original_input: str) -> JsonResult:
     formatted = json.dumps(parsed, indent=2, ensure_ascii=False, sort_keys=False)
     return JsonResult(
         success=True,
@@ -67,12 +136,25 @@ def repair_json_text(input_text: str) -> JsonResult:
         output_text=formatted,
         error_message="",
         status_label="repaired",
+        change_summary=trace.change_summary,
+        repair_warnings=trace.repair_warnings,
+        risk_level=trace.risk_level,
+        detected_input_kind=trace.detected_input_kind,
+        parsed_value=parsed,
+        repair_diff=build_repair_diff(original_input, formatted),
     )
 
 
-def _repair_extracted_fragments(input_text: str) -> JsonResult | None:
+def _repair_extracted_fragments(
+    input_text: str,
+    repair_mode: RepairMode,
+    trace: RepairTrace,
+) -> JsonResult | None:
     fragments = _extract_json_fragments(input_text)
     if not fragments:
+        return None
+
+    if len(fragments) > 1 and repair_mode == "strict":
         return None
 
     parsed_values: list[object] = []
@@ -87,28 +169,68 @@ def _repair_extracted_fragments(input_text: str) -> JsonResult | None:
     except Exception:
         return None
 
-    combined_value: object
-    if len(parsed_values) == 1:
-        combined_value = parsed_values[0]
-    else:
-        combined_value = parsed_values
+    if len(parsed_values) > 1:
+        trace.set_detected_input_kind(_detect_fragment_input_kind(input_text))
+        trace.add_summary("combined_top_level_documents", count=len(parsed_values))
+        trace.add_warning(
+            "combined_top_level_documents",
+            "medium",
+        )
 
-    formatted = json.dumps(combined_value, indent=2, ensure_ascii=False, sort_keys=False)
-    return JsonResult(
-        success=True,
-        mode="repair",
-        output_text=formatted,
-        error_message="",
-        status_label="repaired",
-    )
+    combined_value: object = parsed_values[0] if len(parsed_values) == 1 else parsed_values
+    if trace.detected_input_kind is None:
+        trace.set_detected_input_kind("json")
+    return _build_success_result(combined_value, trace, input_text)
 
 
-def _prepare_repair_input(input_text: str) -> str:
-    normalized_input = input_text.replace("\ufeff", "").replace("\x00", "").replace("\x1e", "\n")
-    normalized_input = normalized_input.translate(SMART_DOUBLE_QUOTES_TRANSLATION)
-    normalized_input = _strip_wrapping_markdown_fence(normalized_input)
-    normalized_input = _normalize_event_stream_text(normalized_input)
-    normalized_input = _escape_unescaped_string_quotes(normalized_input)
+def _prepare_repair_input(input_text: str, repair_mode: RepairMode, trace: RepairTrace) -> str:
+    normalized_input = input_text
+
+    if "\ufeff" in normalized_input:
+        normalized_input = normalized_input.replace("\ufeff", "")
+        trace.add_summary("removed_utf8_bom")
+
+    if "\x00" in normalized_input:
+        normalized_input = normalized_input.replace("\x00", "")
+        trace.add_summary("removed_nul_characters")
+
+    if "\x1e" in normalized_input:
+        normalized_input = normalized_input.replace("\x1e", "\n")
+        trace.set_detected_input_kind("json-seq")
+        trace.add_summary("normalized_json_seq")
+        trace.add_warning(
+            "normalized_json_seq",
+            "medium",
+        )
+
+    translated = normalized_input.translate(SMART_DOUBLE_QUOTES_TRANSLATION)
+    if translated != normalized_input:
+        normalized_input = translated
+        trace.add_summary("normalized_smart_double_quotes")
+
+    stripped = _strip_wrapping_markdown_fence(normalized_input)
+    if stripped != normalized_input:
+        normalized_input = stripped
+        trace.set_detected_input_kind("markdown-fenced-json")
+        trace.add_summary("removed_markdown_fence")
+        trace.raise_risk("low")
+
+    if repair_mode != "strict":
+        stream_normalized = _normalize_event_stream_text(normalized_input, trace)
+        if stream_normalized != normalized_input:
+            normalized_input = stream_normalized
+
+    if _should_apply_quote_heuristic(normalized_input, repair_mode):
+        escaped_input = _escape_unescaped_string_quotes(normalized_input)
+        if escaped_input != normalized_input:
+            normalized_input = escaped_input
+            trace.quote_heuristic_applied = True
+            trace.add_summary("escaped_suspicious_quotes")
+            trace.add_warning(
+                "escaped_suspicious_quotes",
+                "high",
+            )
+
     return normalized_input
 
 
@@ -124,7 +246,7 @@ def _strip_wrapping_markdown_fence(input_text: str) -> str:
     return match.group("body")
 
 
-def _normalize_event_stream_text(input_text: str) -> str:
+def _normalize_event_stream_text(input_text: str, trace: RepairTrace) -> str:
     if not _looks_like_event_stream(input_text):
         return input_text
 
@@ -169,13 +291,27 @@ def _normalize_event_stream_text(input_text: str) -> str:
     if not payloads:
         return input_text
 
+    original_payload_count = len(payloads)
     if len(payloads) > 1 and any(_looks_like_json_payload(payload) for payload in payloads):
-        payloads = [payload for payload in payloads if payload.strip() != "[DONE]"]
+        filtered_payloads = [payload for payload in payloads if payload.strip() != "[DONE]"]
+        if len(filtered_payloads) != len(payloads):
+            trace.add_summary("skipped_done_sentinel")
+        payloads = filtered_payloads
 
     if not payloads:
         return ""
 
-    return "\n\n".join(payloads)
+    normalized_input = "\n\n".join(payloads)
+    if normalized_input != input_text:
+        trace.set_detected_input_kind("event-stream")
+        trace.add_summary("extracted_event_stream_payloads", count=len(payloads))
+        if original_payload_count > 1 or len(payloads) > 1:
+            trace.add_warning(
+                "event_stream_payloads",
+                "medium",
+            )
+
+    return normalized_input
 
 
 def _looks_like_event_stream(input_text: str) -> bool:
@@ -196,6 +332,16 @@ def _looks_like_json_payload(payload: str) -> bool:
         return False
 
     return stripped[0] in '{["-0123456789tfn'
+
+
+def _should_apply_quote_heuristic(input_text: str, repair_mode: RepairMode) -> bool:
+    if repair_mode == "strict":
+        return False
+
+    if repair_mode == "aggressive":
+        return '"' in input_text
+
+    return any(token in input_text for token in ("<", "</", "src=", "href=", "style=", '""'))
 
 
 def _escape_unescaped_string_quotes(input_text: str) -> str:
@@ -292,8 +438,6 @@ def _extract_json_fragments(input_text: str) -> list[str]:
     opening_tokens = {"{": "}", "[": "]"}
     closing_tokens = {"}": "{", "]": "["}
 
-    # Extract top-level JSON-like chunks so stream-style or repeated payloads
-    # can be repaired and rendered together instead of truncating to one value.
     for index, char in enumerate(input_text):
         if in_string:
             if escape_next:
@@ -336,6 +480,16 @@ def _extract_json_fragments(input_text: str) -> list[str]:
             fragments.append(fragment)
 
     return fragments
+
+
+def _detect_fragment_input_kind(input_text: str) -> str:
+    if "\x1e" in input_text:
+        return "json-seq"
+    if _looks_like_event_stream(input_text):
+        return "event-stream"
+    if "\n" in input_text:
+        return "concatenated-documents"
+    return "json"
 
 
 def _format_decode_error(error: json.JSONDecodeError) -> str:

@@ -1,0 +1,3 @@
+{"team":"alpha","region":"kr-seoul","services":[{"name":"viewer","status":"green"},{"name":"repair","status":"green"}],"metrics":{"latencyMs":48,"errors":0}}
+{"team":"beta","region":"jp-tokyo","services":[{"name":"viewer","status":"yellow"},{"name":"repair","status":"green"}],"metrics":{"latencyMs":63,"errors":2}}
+{"team":"gamma","region":"us-virginia","services":[{"name":"viewer","status":"green"},{"name":"repair","status":"yellow"}],"metrics":{"latencyMs":71,"errors":1}}

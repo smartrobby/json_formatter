@@ -1,0 +1,10 @@
+event: session-start
+data: {"sessionId":"sess-1001","user":"robby","step":"open-file","filename":"06-json-lines.jsonl"}
+
+event: repair-run
+data: {"sessionId":"sess-1001","user":"robby","step":"repair","mode":"safe","summary":["Extracted payloads","Combined documents"],"risk":"medium"}
+
+event: tree-search
+data: {"sessionId":"sess-1001","user":"robby","step":"search","query":"warehouse","path":"$.regions[1].sites[0].devices[1]"}
+
+data: [DONE]

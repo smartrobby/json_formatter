@@ -1,0 +1,17 @@
+{"document_id":"doc-42","template":"landing-page-export","html_content":"<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Campaign Export</title>
+  </head>
+  <body>
+    <section class="hero">
+      <h1>Spring Campaign</h1>
+      <img src="https://cdn.example.com/banner.png" alt="hero "banner" image" style="width: 100%; max-width: 960px; height: auto;">
+      <p>Use this export to verify aggressive quote repair inside long HTML-like strings.</p>
+    </section>
+    <section class="content">
+      <a href="https://example.com/signup" data-track="cta "signup"">Join now</a>
+    </section>
+  </body>
+</html>","output_filename":"campaign-export.docx"}
