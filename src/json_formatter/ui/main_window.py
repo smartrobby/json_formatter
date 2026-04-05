@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -114,6 +116,9 @@ class MainWindow(QMainWindow):
         self.auto_process_timer.timeout.connect(self._emit_auto_process_requested)
         self.input_edit.fontZoomRequested.connect(self.adjust_input_font_size)
         self.output_edit.fontZoomRequested.connect(self.adjust_output_font_size)
+        self.input_panel.openFileRequested.connect(self.open_input_file_dialog)
+        self.input_panel.fileDropped.connect(self.load_input_file)
+        self.input_panel.repairModeChanged.connect(self._handle_repair_mode_changed)
 
         self.save_shortcut = QShortcut(QKeySequence.Save, self)
         self.save_shortcut.activated.connect(self.save_output_to_file)
@@ -195,6 +200,8 @@ class MainWindow(QMainWindow):
 
     def _mark_output_stale(self) -> None:
         self.output_panel.mark_stale()
+        self.output_panel.set_summary([], [], None)
+        self.output_panel.set_tree_value(None)
         self.set_status("Updating...")
         self.set_error("")
         self._sync_output_buttons_state()
@@ -207,6 +214,21 @@ class MainWindow(QMainWindow):
 
     def get_output_text(self) -> str:
         return self.output_panel.get_text()
+
+    def current_repair_mode(self) -> str:
+        return self.input_panel.current_repair_mode()
+
+    def highlight_input_error(
+        self,
+        *,
+        line: int | None = None,
+        column: int | None = None,
+        index: int | None = None,
+    ) -> None:
+        self.input_panel.highlight_error(line=line, column=column, index=index)
+
+    def clear_input_error_highlight(self) -> None:
+        self.input_panel.clear_error_highlight()
 
     def adjust_input_font_size(self, delta: int) -> None:
         self._input_font_size = self._update_editor_font_size(
@@ -233,19 +255,26 @@ class MainWindow(QMainWindow):
         status_text: str = "Ready",
         success: bool = True,
         default_filename: str = "formatted.json",
+        parsed_value: object | None = None,
+        change_summary: list[str] | None = None,
+        repair_warnings: list[str] | None = None,
+        risk_level: str | None = None,
     ) -> None:
         self.output_panel.set_output_text(
             text,
             status_text=status_text,
             success=success,
             default_filename=default_filename,
+            parsed_value=parsed_value,
         )
+        self.output_panel.set_summary(change_summary or [], repair_warnings or [], risk_level)
         self.set_status(status_text)
         self.set_error("")
         self._sync_output_buttons_state()
 
     def clear_output(self, *, status_text: str = "Ready", error_text: str = "") -> None:
         self.output_panel.clear_output()
+        self.clear_input_error_highlight()
         self.set_status(status_text)
         self.set_error(error_text)
         self._sync_output_buttons_state()
@@ -270,20 +299,77 @@ class MainWindow(QMainWindow):
         output_text: str,
         status_text: str = "Success",
         default_filename: str = "formatted.json",
+        parsed_value: object | None = None,
+        change_summary: list[str] | None = None,
+        repair_warnings: list[str] | None = None,
+        risk_level: str | None = None,
     ) -> None:
         self.set_output_text(
             output_text,
             status_text=status_text,
             success=True,
             default_filename=default_filename,
+            parsed_value=parsed_value,
+            change_summary=change_summary,
+            repair_warnings=repair_warnings,
+            risk_level=risk_level,
         )
 
     def set_error_state(self, error_text: str, status_text: str = "Error") -> None:
+        self.output_panel.clear_output()
         self.output_panel.set_error_state(status_text=status_text)
         self.set_status(status_text)
         self.set_error(error_text)
         self.copy_button.setEnabled(False)
         self.save_button.setEnabled(False)
+
+    def open_input_file_dialog(self, start_path: str = "") -> None:
+        dialog_directory = self._resolve_open_dialog_directory(start_path)
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open JSON Input",
+            dialog_directory,
+            (
+                "JSON and Text Files (*.json *.jsonl *.txt);;"
+                "JSON Files (*.json);;"
+                "JSON Lines (*.jsonl);;"
+                "Text Files (*.txt);;"
+                "All Files (*)"
+            ),
+        )
+        if not path:
+            return
+
+        self.load_input_file(path)
+
+    def load_input_file(self, path: str) -> bool:
+        target_path = Path(path)
+        try:
+            text = target_path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as exc:
+            self._show_warning(f"Failed to open file: {exc}")
+            return False
+
+        self.input_panel.set_last_open_path(str(target_path))
+        self.set_input_text(text)
+        return True
+
+    def _handle_repair_mode_changed(self, _mode: str) -> None:
+        if self.get_input_text().strip():
+            self._schedule_auto_processing()
+
+    def _resolve_open_dialog_directory(self, start_path: str) -> str:
+        if not start_path:
+            return ""
+
+        candidate = Path(start_path)
+        if candidate.is_dir():
+            return str(candidate)
+        if candidate.exists():
+            return str(candidate.parent)
+        if candidate.suffix and candidate.parent != Path("."):
+            return str(candidate.parent)
+        return str(candidate)
 
     def copy_output_to_clipboard(self) -> None:
         text = self.get_output_text()

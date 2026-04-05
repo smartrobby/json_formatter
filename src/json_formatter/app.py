@@ -31,6 +31,7 @@ class JsonFormatterController:
 
     def handle_auto_process_requested(self, input_text: str) -> None:
         if not input_text.strip():
+            self.window.clear_input_error_highlight()
             self.window.clear_output()
             return
 
@@ -44,7 +45,11 @@ class JsonFormatterController:
         if format_result.success:
             return format_result
 
-        repair_result = process_json(input_text, "repair")
+        repair_result = process_json(
+            input_text,
+            "repair",
+            repair_mode=self.window.current_repair_mode(),
+        )
         if repair_result.success:
             return repair_result
 
@@ -57,19 +62,32 @@ class JsonFormatterController:
                 f"Repair failed: {repair_result.error_message}"
             ),
             status_label="error",
+            error_line=format_result.error_line,
+            error_column=format_result.error_column,
+            error_index=format_result.error_index,
         )
 
     def _apply_result(self, result: JsonResult) -> None:
         if result.success:
+            self.window.clear_input_error_highlight()
             status_text = "Valid JSON" if result.status_label == "valid" else "Repaired JSON"
             default_name = "formatted.json" if result.mode == "format" else "repaired.json"
             self.window.set_success_state(
                 result.output_text,
                 status_text=status_text,
                 default_filename=default_name,
+                parsed_value=result.parsed_value,
+                change_summary=result.change_summary,
+                repair_warnings=result.repair_warnings,
+                risk_level=result.risk_level,
             )
             return
 
+        self.window.highlight_input_error(
+            line=result.error_line,
+            column=result.error_column,
+            index=result.error_index,
+        )
         status_text = "Unable to process input"
         self.window.set_error_state(result.error_message, status_text=status_text)
 
