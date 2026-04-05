@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
-from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextCursor, QWheelEvent
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -20,35 +18,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .highlighter import JsonSyntaxHighlighter
+from .input_panel import InputPanel
+from .output_panel import OutputPanel
 
 DEFAULT_EDITOR_FONT_SIZE = 10
 MIN_EDITOR_FONT_SIZE = 8
 MAX_EDITOR_FONT_SIZE = 28
 INPUT_FONT_SIZE_KEY = "ui/font_size/input"
 OUTPUT_FONT_SIZE_KEY = "ui/font_size/output"
-
-
-@dataclass(slots=True)
-class OutputState:
-    text: str = ""
-    status_text: str = "Ready"
-    has_success: bool = False
-    default_filename: str = "formatted.json"
-
-
-class ZoomableTextEdit(QTextEdit):
-    fontZoomRequested = Signal(int)
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        if event.modifiers() & Qt.ControlModifier:
-            angle_delta = event.angleDelta().y()
-            if angle_delta:
-                self.fontZoomRequested.emit(1 if angle_delta > 0 else -1)
-                event.accept()
-                return
-
-        super().wheelEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -61,7 +38,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("JSON Viewer & Formatter")
         self.resize(1280, 800)
 
-        self._output_state = OutputState()
         self.controller = None
         self._settings = self._create_settings()
         self._input_font_size = self._load_font_size(
@@ -75,7 +51,6 @@ class MainWindow(QMainWindow):
         self.auto_process_timer = QTimer(self)
         self.auto_process_timer.setSingleShot(True)
         self.auto_process_timer.setInterval(200)
-        self.output_highlighter = None
 
         self._build_ui()
         self._wire_actions()
@@ -106,29 +81,13 @@ class MainWindow(QMainWindow):
         self.splitter = QSplitter(Qt.Horizontal, central)
         self.splitter.setChildrenCollapsible(False)
 
-        left_panel = QWidget(self.splitter)
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(6)
-        left_layout.addWidget(QLabel("Raw JSON Input", left_panel))
+        self.input_panel = InputPanel(self.splitter)
+        self.output_panel = OutputPanel(self.splitter)
 
-        self.input_edit = ZoomableTextEdit(left_panel)
-        self.input_edit.setAcceptRichText(False)
-        self.input_edit.setPlaceholderText("Paste or type JSON here")
-        left_layout.addWidget(self.input_edit, 1)
-
-        right_panel = QWidget(self.splitter)
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(6)
-        right_layout.addWidget(QLabel("Formatted / Repaired Output", right_panel))
-
-        self.output_edit = ZoomableTextEdit(right_panel)
-        self.output_edit.setAcceptRichText(False)
-        self.output_edit.setReadOnly(True)
-        self.output_edit.setPlaceholderText("Formatted JSON will appear here")
-        self.output_edit.setStyleSheet("QTextEdit { background: #fbfcfe; }")
-        right_layout.addWidget(self.output_edit, 1)
+        # Preserve existing MainWindow attribute surface for current tests and controller code.
+        self.input_edit = self.input_panel.input_edit
+        self.output_edit = self.output_panel.output_edit
+        self.output_highlighter = self.output_panel.output_highlighter
 
         root_layout.addWidget(toolbar)
         root_layout.addWidget(self.splitter, 1)
@@ -142,14 +101,10 @@ class MainWindow(QMainWindow):
         self.error_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.status_bar.addWidget(self.error_label, 1)
 
-        self._apply_monospace_font()
+        self._apply_all_editor_font_sizes()
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([1, 1])
-
-    def _apply_monospace_font(self) -> None:
-        self._apply_all_editor_font_sizes()
-        self.output_highlighter = JsonSyntaxHighlighter(self.output_edit.document())
 
     def _wire_actions(self) -> None:
         self.copy_button.clicked.connect(self.copy_output_to_clipboard)
@@ -191,8 +146,8 @@ class MainWindow(QMainWindow):
         editor.setFont(self._build_monospace_font(point_size))
 
     def _apply_all_editor_font_sizes(self) -> None:
-        self._apply_editor_font_size(self.input_edit, self._input_font_size)
-        self._apply_editor_font_size(self.output_edit, self._output_font_size)
+        self.input_panel.apply_editor_font(self._build_monospace_font(self._input_font_size))
+        self.output_panel.apply_editor_font(self._build_monospace_font(self._output_font_size))
 
     def _clamp_font_size(self, point_size: int) -> int:
         return max(MIN_EDITOR_FONT_SIZE, min(MAX_EDITOR_FONT_SIZE, point_size))
@@ -222,7 +177,7 @@ class MainWindow(QMainWindow):
         self.set_error("")
 
     def _schedule_auto_processing(self) -> None:
-        current_text = self.input_edit.toPlainText()
+        current_text = self.get_input_text()
         if not current_text.strip():
             self.auto_process_timer.stop()
             self.clear_output()
@@ -232,31 +187,26 @@ class MainWindow(QMainWindow):
         self.auto_process_timer.start()
 
     def _emit_auto_process_requested(self) -> None:
-        self.autoProcessRequested.emit(self.input_edit.toPlainText())
+        self.autoProcessRequested.emit(self.get_input_text())
 
     def _sync_output_buttons_state(self) -> None:
-        self.copy_button.setEnabled(self._output_state.has_success and bool(self._output_state.text))
-        self.save_button.setEnabled(self._output_state.has_success and bool(self._output_state.text))
+        self.copy_button.setEnabled(self.output_panel.has_success and bool(self.output_panel.text))
+        self.save_button.setEnabled(self.output_panel.has_success and bool(self.output_panel.text))
 
     def _mark_output_stale(self) -> None:
-        self._output_state = OutputState(
-            text=self._output_state.text,
-            status_text="Updating...",
-            has_success=False,
-            default_filename=self._output_state.default_filename,
-        )
+        self.output_panel.mark_stale()
         self.set_status("Updating...")
         self.set_error("")
         self._sync_output_buttons_state()
 
     def set_input_text(self, text: str) -> None:
-        self.input_edit.setPlainText(text)
+        self.input_panel.set_text(text)
 
     def get_input_text(self) -> str:
-        return self.input_edit.toPlainText()
+        return self.input_panel.get_text()
 
     def get_output_text(self) -> str:
-        return self.output_edit.toPlainText()
+        return self.output_panel.get_text()
 
     def adjust_input_font_size(self, delta: int) -> None:
         self._input_font_size = self._update_editor_font_size(
@@ -284,21 +234,18 @@ class MainWindow(QMainWindow):
         success: bool = True,
         default_filename: str = "formatted.json",
     ) -> None:
-        self._output_state = OutputState(
-            text=text,
+        self.output_panel.set_output_text(
+            text,
             status_text=status_text,
-            has_success=success,
+            success=success,
             default_filename=default_filename,
         )
-        self.output_edit.setPlainText(text)
-        self.output_edit.moveCursor(QTextCursor.Start)
         self.set_status(status_text)
         self.set_error("")
         self._sync_output_buttons_state()
 
     def clear_output(self, *, status_text: str = "Ready", error_text: str = "") -> None:
-        self._output_state = OutputState()
-        self.output_edit.clear()
+        self.output_panel.clear_output()
         self.set_status(status_text)
         self.set_error(error_text)
         self._sync_output_buttons_state()
@@ -313,8 +260,8 @@ class MainWindow(QMainWindow):
     def set_processing(self, processing: bool) -> None:
         if processing:
             self.set_status("Processing...")
-        elif self._output_state.has_success:
-            self.set_status(self._output_state.status_text)
+        elif self.output_panel.has_success:
+            self.set_status(self.output_panel.status_text)
         else:
             self.set_status("Ready")
 
@@ -332,7 +279,7 @@ class MainWindow(QMainWindow):
         )
 
     def set_error_state(self, error_text: str, status_text: str = "Error") -> None:
-        self._output_state = OutputState(text=self._output_state.text, status_text=status_text, has_success=False)
+        self.output_panel.set_error_state(status_text=status_text)
         self.set_status(status_text)
         self.set_error(error_text)
         self.copy_button.setEnabled(False)
@@ -356,7 +303,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Save JSON Output",
-            self._output_state.default_filename,
+            self.output_panel.default_filename,
             "JSON Files (*.json);;All Files (*)",
         )
         if not path:
