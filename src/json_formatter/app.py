@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from .models import JsonResult
 from .services import process_json
+from .ui.localization import translate
 from .ui import MainWindow
 
 
@@ -70,16 +71,17 @@ class JsonFormatterController:
     def _apply_result(self, result: JsonResult) -> None:
         if result.success:
             self.window.clear_input_error_highlight()
-            status_text = "Valid JSON" if result.status_label == "valid" else "Repaired JSON"
+            status_key = "status.valid_json" if result.status_label == "valid" else "status.repaired_json"
             default_name = "formatted.json" if result.mode == "format" else "repaired.json"
             self.window.set_success_state(
                 result.output_text,
-                status_text=status_text,
+                status_key=status_key,
                 default_filename=default_name,
                 parsed_value=result.parsed_value,
                 change_summary=result.change_summary,
                 repair_warnings=result.repair_warnings,
                 risk_level=result.risk_level,
+                repair_diff=result.repair_diff,
             )
             return
 
@@ -88,8 +90,7 @@ class JsonFormatterController:
             column=result.error_column,
             index=result.error_index,
         )
-        status_text = "Unable to process input"
-        self.window.set_error_state(result.error_message, status_text=status_text)
+        self.window.set_error_state(result.error_message, status_key="status.unable_to_process")
 
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -128,13 +129,13 @@ def _run_smoke_test(report_path: Path | None) -> int:
             "name": "format",
             "input": '{"alpha":1,"beta":2}',
             "expected_output": '{\n  "alpha": 1,\n  "beta": 2\n}',
-            "expected_status": "Valid JSON",
+            "expected_status_key": "status.valid_json",
         },
         {
             "name": "repair",
             "input": "{'alpha':1, beta:'two',}",
             "expected_output": '{\n  "alpha": 1,\n  "beta": "two"\n}',
-            "expected_status": "Repaired JSON",
+            "expected_status_key": "status.repaired_json",
         },
     ]
     report: dict[str, object] = {"success": True, "cases": []}
@@ -148,9 +149,10 @@ def _run_smoke_test(report_path: Path | None) -> int:
         actual_output = window.get_output_text()
         actual_status = window.status_label.text()
         actual_error = window.error_label.text()
+        expected_status = translate(window.current_language(), case["expected_status_key"])
         passed = (
             actual_output == case["expected_output"]
-            and actual_status == case["expected_status"]
+            and actual_status == expected_status
             and actual_error == ""
         )
 

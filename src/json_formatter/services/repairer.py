@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 
 from json_repair import repair_json
 
-from ..models import JsonResult, RepairMode, RiskLevel
+from ..models import JsonResult, RepairMode, RiskLevel, UiMessage
+from .repair_diff import build_repair_diff
 
 SMART_DOUBLE_QUOTES_TRANSLATION = str.maketrans(
     {
@@ -22,17 +23,19 @@ RISK_PRIORITY: dict[RiskLevel, int] = {"low": 1, "medium": 2, "high": 3}
 
 @dataclass(slots=True)
 class RepairTrace:
-    change_summary: list[str] = field(default_factory=list)
-    repair_warnings: list[str] = field(default_factory=list)
+    change_summary: list[UiMessage] = field(default_factory=list)
+    repair_warnings: list[UiMessage] = field(default_factory=list)
     risk_level: RiskLevel | None = None
     detected_input_kind: str | None = None
     quote_heuristic_applied: bool = False
 
-    def add_summary(self, message: str) -> None:
+    def add_summary(self, code: str, **params: str | int) -> None:
+        message = UiMessage(code=code, params=params)
         if message not in self.change_summary:
             self.change_summary.append(message)
 
-    def add_warning(self, message: str, risk_level: RiskLevel) -> None:
+    def add_warning(self, code: str, risk_level: RiskLevel, **params: str | int) -> None:
+        message = UiMessage(code=code, params=params)
         if message not in self.repair_warnings:
             self.repair_warnings.append(message)
         self.raise_risk(risk_level)
@@ -122,10 +125,10 @@ def repair_json_text(input_text: str, repair_mode: RepairMode = "safe") -> JsonR
             error_index=exc.pos,
         )
 
-    return _build_success_result(parsed, trace)
+    return _build_success_result(parsed, trace, input_text)
 
 
-def _build_success_result(parsed: object, trace: RepairTrace) -> JsonResult:
+def _build_success_result(parsed: object, trace: RepairTrace, original_input: str) -> JsonResult:
     formatted = json.dumps(parsed, indent=2, ensure_ascii=False, sort_keys=False)
     return JsonResult(
         success=True,
@@ -138,6 +141,7 @@ def _build_success_result(parsed: object, trace: RepairTrace) -> JsonResult:
         risk_level=trace.risk_level,
         detected_input_kind=trace.detected_input_kind,
         parsed_value=parsed,
+        repair_diff=build_repair_diff(original_input, formatted),
     )
 
 
@@ -167,16 +171,16 @@ def _repair_extracted_fragments(
 
     if len(parsed_values) > 1:
         trace.set_detected_input_kind(_detect_fragment_input_kind(input_text))
-        trace.add_summary(f"Combined {len(parsed_values)} top-level JSON documents into one array.")
+        trace.add_summary("combined_top_level_documents", count=len(parsed_values))
         trace.add_warning(
-            "Multiple top-level JSON documents were merged into a single JSON array.",
+            "combined_top_level_documents",
             "medium",
         )
 
     combined_value: object = parsed_values[0] if len(parsed_values) == 1 else parsed_values
     if trace.detected_input_kind is None:
         trace.set_detected_input_kind("json")
-    return _build_success_result(combined_value, trace)
+    return _build_success_result(combined_value, trace, input_text)
 
 
 def _prepare_repair_input(input_text: str, repair_mode: RepairMode, trace: RepairTrace) -> str:
@@ -184,31 +188,31 @@ def _prepare_repair_input(input_text: str, repair_mode: RepairMode, trace: Repai
 
     if "\ufeff" in normalized_input:
         normalized_input = normalized_input.replace("\ufeff", "")
-        trace.add_summary("Removed UTF-8 BOM.")
+        trace.add_summary("removed_utf8_bom")
 
     if "\x00" in normalized_input:
         normalized_input = normalized_input.replace("\x00", "")
-        trace.add_summary("Removed NUL characters.")
+        trace.add_summary("removed_nul_characters")
 
     if "\x1e" in normalized_input:
         normalized_input = normalized_input.replace("\x1e", "\n")
         trace.set_detected_input_kind("json-seq")
-        trace.add_summary("Normalized JSON text sequence record separators.")
+        trace.add_summary("normalized_json_seq")
         trace.add_warning(
-            "Record-separated JSON messages were normalized before repair.",
+            "normalized_json_seq",
             "medium",
         )
 
     translated = normalized_input.translate(SMART_DOUBLE_QUOTES_TRANSLATION)
     if translated != normalized_input:
         normalized_input = translated
-        trace.add_summary("Normalized smart double quotes.")
+        trace.add_summary("normalized_smart_double_quotes")
 
     stripped = _strip_wrapping_markdown_fence(normalized_input)
     if stripped != normalized_input:
         normalized_input = stripped
         trace.set_detected_input_kind("markdown-fenced-json")
-        trace.add_summary("Removed wrapping markdown code fence.")
+        trace.add_summary("removed_markdown_fence")
         trace.raise_risk("low")
 
     if repair_mode != "strict":
@@ -221,9 +225,9 @@ def _prepare_repair_input(input_text: str, repair_mode: RepairMode, trace: Repai
         if escaped_input != normalized_input:
             normalized_input = escaped_input
             trace.quote_heuristic_applied = True
-            trace.add_summary("Escaped suspicious unescaped quotes inside string content.")
+            trace.add_summary("escaped_suspicious_quotes")
             trace.add_warning(
-                "Suspicious quotes inside string content were escaped heuristically.",
+                "escaped_suspicious_quotes",
                 "high",
             )
 
@@ -291,7 +295,7 @@ def _normalize_event_stream_text(input_text: str, trace: RepairTrace) -> str:
     if len(payloads) > 1 and any(_looks_like_json_payload(payload) for payload in payloads):
         filtered_payloads = [payload for payload in payloads if payload.strip() != "[DONE]"]
         if len(filtered_payloads) != len(payloads):
-            trace.add_summary("Skipped [DONE] stream sentinel.")
+            trace.add_summary("skipped_done_sentinel")
         payloads = filtered_payloads
 
     if not payloads:
@@ -300,10 +304,10 @@ def _normalize_event_stream_text(input_text: str, trace: RepairTrace) -> str:
     normalized_input = "\n\n".join(payloads)
     if normalized_input != input_text:
         trace.set_detected_input_kind("event-stream")
-        trace.add_summary(f"Extracted {len(payloads)} JSON payload(s) from event stream input.")
+        trace.add_summary("extracted_event_stream_payloads", count=len(payloads))
         if original_payload_count > 1 or len(payloads) > 1:
             trace.add_warning(
-                "Event stream payloads were normalized before repair.",
+                "event_stream_payloads",
                 "medium",
             )
 

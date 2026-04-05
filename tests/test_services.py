@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 
+from json_formatter.models import UiMessage
 from json_formatter.services.formatter import format_json
 from json_formatter.services.processor import process_json
 from json_formatter.services.repairer import repair_json_text
+from json_formatter.ui.localization import render_ui_message, render_ui_warning
 
 
 def test_format_json_pretty_prints_valid_json_with_parsed_value() -> None:
@@ -19,6 +21,7 @@ def test_format_json_pretty_prints_valid_json_with_parsed_value() -> None:
     assert result.change_summary == []
     assert result.repair_warnings == []
     assert result.detected_input_kind == "json"
+    assert result.repair_diff is None
 
 
 def test_format_json_returns_location_metadata_on_error() -> None:
@@ -34,7 +37,7 @@ def test_format_json_returns_location_metadata_on_error() -> None:
     assert result.error_index is not None
 
 
-def test_repair_json_fixes_common_malformed_json_with_summary() -> None:
+def test_repair_json_fixes_common_malformed_json_without_forced_summary() -> None:
     result = repair_json_text("{'name': 'Alice', trailing: true,}")
 
     assert result.success is True
@@ -43,13 +46,14 @@ def test_repair_json_fixes_common_malformed_json_with_summary() -> None:
     assert result.output_text == '{\n  "name": "Alice",\n  "trailing": true\n}'
     assert result.change_summary == []
     assert result.risk_level is None
+    assert result.repair_diff is not None
 
 
 def test_repair_json_preserves_unicode() -> None:
     result = repair_json_text("{'message': '\\uac15\\uc544',}")
 
     assert result.success is True
-    assert "\uac15\uc544" in result.output_text
+    assert "강아" in result.output_text
 
 
 def test_repair_json_combines_multiple_top_level_objects_into_array_with_warning() -> None:
@@ -86,9 +90,11 @@ def test_repair_json_combines_multiple_top_level_objects_into_array_with_warning
     assert isinstance(parsed, list)
     assert len(parsed) == 2
     assert result.detected_input_kind == "concatenated-documents"
-    assert any("Combined 2 top-level JSON documents" in item for item in result.change_summary)
+    assert UiMessage("combined_top_level_documents", {"count": 2}) in result.change_summary
+    assert UiMessage("combined_top_level_documents", {}) in result.repair_warnings
     assert result.risk_level == "medium"
-    assert result.repair_warnings
+    assert result.repair_diff is not None
+    assert result.repair_diff.output_spans
 
 
 def test_repair_json_preserves_valid_array_documents() -> None:
@@ -165,7 +171,7 @@ data: {
     assert isinstance(parsed, list)
     assert len(parsed) == 2
     assert result.detected_input_kind == "event-stream"
-    assert any("Extracted 2 JSON payload" in item for item in result.change_summary)
+    assert UiMessage("extracted_event_stream_payloads", {"count": 2}) in result.change_summary
 
 
 def test_repair_json_ignores_bom_prefix() -> None:
@@ -173,7 +179,7 @@ def test_repair_json_ignores_bom_prefix() -> None:
 
     assert result.success is True
     assert json.loads(result.output_text) == {"alpha": 1}
-    assert "Removed UTF-8 BOM." in result.change_summary
+    assert UiMessage("removed_utf8_bom") in result.change_summary
 
 
 def test_repair_json_normalizes_smart_double_quotes() -> None:
@@ -183,7 +189,7 @@ def test_repair_json_normalizes_smart_double_quotes() -> None:
     parsed = json.loads(result.output_text)
     assert parsed["users"][0]["name"] == "robby"
     assert parsed["users"][0]["age"] == 20
-    assert "Normalized smart double quotes." in result.change_summary
+    assert UiMessage("normalized_smart_double_quotes") in result.change_summary
 
 
 def test_repair_json_normalizes_sse_messages_and_skips_done_sentinel() -> None:
@@ -206,7 +212,8 @@ data: [DONE]
     assert len(parsed) == 2
     assert parsed[0]["username"] == "bobby"
     assert parsed[1]["username"] == "sean"
-    assert "Skipped [DONE] stream sentinel." in result.change_summary
+    assert UiMessage("skipped_done_sentinel") in result.change_summary
+    assert UiMessage("event_stream_payloads") in result.repair_warnings
 
 
 def test_repair_json_preserves_html_like_string_content_without_splitting_keys() -> None:
@@ -229,6 +236,7 @@ def test_repair_json_preserves_html_like_string_content_without_splitting_keys()
     assert 'style="width: 100%; max-width: 600px; height: auto;"' in parsed["html_content"]
     assert parsed["output_filename"] == "converted_document.docx"
     assert result.risk_level == "high"
+    assert UiMessage("escaped_suspicious_quotes") in result.change_summary
 
 
 def test_strict_mode_is_more_conservative_for_stream_documents() -> None:
@@ -254,7 +262,7 @@ def test_aggressive_mode_recovers_ambiguous_broken_quotes_better_than_safe() -> 
     assert json.loads(safe_result.output_text)["note"] == 'alpha "beta" gamma'
     assert safe_result.risk_level is None
     assert aggressive_result.risk_level == "high"
-    assert aggressive_result.repair_warnings
+    assert aggressive_result.repair_warnings == [UiMessage("escaped_suspicious_quotes")]
 
 
 def test_process_json_passes_repair_mode_to_repairer() -> None:
@@ -262,3 +270,13 @@ def test_process_json_passes_repair_mode_to_repairer() -> None:
 
     assert result.success is True
     assert json.loads(result.output_text)["note"] == 'alpha "beta" gamma'
+
+
+def test_localized_message_templates_render_consistently() -> None:
+    message = UiMessage("extracted_event_stream_payloads", {"count": 2})
+    warning = UiMessage("combined_top_level_documents")
+
+    assert render_ui_message("en", message) == "Extracted 2 JSON payload(s) from event stream input."
+    assert render_ui_message("ko", message) == "event-stream 입력에서 JSON payload 2개를 추출했습니다."
+    assert render_ui_warning("en", warning) == "Multiple top-level JSON documents were merged into a single JSON array."
+    assert render_ui_warning("ko", warning) == "여러 top-level JSON document를 하나의 JSON array로 병합했습니다."

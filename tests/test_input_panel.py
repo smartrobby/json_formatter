@@ -5,7 +5,9 @@ from pathlib import Path
 from PySide6.QtCore import QMimeData, QSettings, QUrl
 
 from json_formatter.app import create_application
+from json_formatter.models import UiMessage
 from json_formatter.ui.input_panel import InputPanel
+from json_formatter.ui.theme import DARK_THEME
 
 
 class DummyDropEvent:
@@ -47,12 +49,36 @@ def _set_isolated_settings(tmp_path: Path) -> None:
     settings.sync()
 
 
-def test_default_repair_mode_is_safe(tmp_path: Path, qtbot) -> None:
+def test_default_repair_mode_is_safe_and_language_is_korean(tmp_path: Path, qtbot) -> None:
     _set_isolated_settings(tmp_path)
     panel = InputPanel()
     qtbot.addWidget(panel)
 
     assert panel.current_repair_mode() == "safe"
+    assert panel.title_label.text() == "Raw JSON Input"
+    assert panel.search_button.text()
+
+
+def test_summary_warning_and_risk_widgets_render_in_input_panel(tmp_path: Path, qtbot) -> None:
+    _set_isolated_settings(tmp_path)
+    panel = InputPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+
+    panel.set_summary(
+        [
+            UiMessage("normalized_smart_double_quotes"),
+            UiMessage("combined_top_level_documents", {"count": 2}),
+        ],
+        [UiMessage("escaped_suspicious_quotes")],
+        "high",
+    )
+
+    assert panel.summary_label.isVisible() is True
+    assert panel.warning_label.isVisible() is True
+    assert "smart double quotes" in panel.summary_edit.toPlainText()
+    assert "quote" in panel.warning_edit.toPlainText()
+    assert panel.risk_badge.isHidden() is False
 
 
 def test_repair_mode_persists_between_instances(tmp_path: Path, qtbot) -> None:
@@ -126,17 +152,54 @@ def test_drag_enter_rejects_non_file_data(tmp_path: Path, qtbot) -> None:
     assert drag_event.ignored is True
 
 
-def test_highlight_error_selects_error_line_and_can_be_cleared(tmp_path: Path, qtbot) -> None:
+def test_highlight_error_diff_and_search_can_be_cleared(tmp_path: Path, qtbot) -> None:
     _set_isolated_settings(tmp_path)
     panel = InputPanel()
     qtbot.addWidget(panel)
     panel.set_text('{\n  "name": "robby",\n  "age": 20,,\n}')
 
     panel.highlight_error(line=3, column=12, index=30)
+    panel.set_diff_spans([(5, 11)])
+    panel.show_search()
+    panel.search_bar.query_edit.setText("robby")
 
     selections = panel.input_edit.extraSelections()
-    assert len(selections) == 1
-    assert panel.input_edit.textCursor().blockNumber() == 2
+    assert len(selections) >= 3
+    assert panel.input_edit.textCursor().selectedText() == "robby"
 
     panel.clear_error_highlight()
+    panel.clear_diff_spans()
+    panel.search_bar.close_bar()
     assert panel.input_edit.extraSelections() == []
+
+
+def test_diff_toggle_hides_diff_but_keeps_search_and_error(tmp_path: Path, qtbot) -> None:
+    _set_isolated_settings(tmp_path)
+    panel = InputPanel()
+    qtbot.addWidget(panel)
+    panel.set_text('{\n  "name": "robby",\n  "age": 20,,\n}')
+    panel.highlight_error(line=3, column=12, index=30)
+    panel.set_diff_spans([(5, 11)])
+    panel.show_search()
+    panel.search_bar.query_edit.setText("robby")
+
+    with_diff = len(panel.input_edit.extraSelections())
+    panel.set_diff_highlight_enabled(False)
+    without_diff = len(panel.input_edit.extraSelections())
+
+    assert with_diff > without_diff
+    assert without_diff >= 2
+
+
+def test_apply_theme_updates_editor_styles_search_bar_and_summary_widgets(tmp_path: Path, qtbot) -> None:
+    _set_isolated_settings(tmp_path)
+    panel = InputPanel()
+    qtbot.addWidget(panel)
+    panel.set_summary([UiMessage("removed_utf8_bom")], [UiMessage("combined_top_level_documents", {"count": 2})], "medium")
+
+    panel.apply_theme(DARK_THEME)
+
+    assert DARK_THEME.input_background in panel.input_edit.styleSheet()
+    assert DARK_THEME.surface_background in panel.search_bar.styleSheet()
+    assert DARK_THEME.surface_alt_background in panel.summary_edit.styleSheet()
+    assert panel.risk_badge.isHidden() is False
